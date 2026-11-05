@@ -1,6 +1,8 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <sstream>
+#include <vector>
 using namespace std;
 
 int main() {
@@ -16,14 +18,23 @@ int main() {
     getline(file, line);  // first line = column names
     cout << "HEADER: " << line << endl << endl;
 
-    int count = 0;
+       int count = 0;
 
-   while (getline(file, line)) {
-    count++;
-    if (count <= 10) {
-        cout << line << endl;
+    while (getline(file, line)) {
+        count++;
+
+        if (count <= 10) {
+            stringstream ss(line);
+            string field;
+            vector<string> fields;
+
+            while (getline(ss, field, ',')) {
+                fields.push_back(field);
+            }
+
+            cout << fields[3] << " | " << fields[22] << endl;
+        }
     }
-}
 
     cout << endl << "Total players: " << count << endl;
 
