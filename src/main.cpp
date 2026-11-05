@@ -5,7 +5,21 @@
 #include <vector>
 using namespace std;
 
+
+//gets rid of the quotations
+string stripQuotes(string s) {
+    if (s.size() >= 2 && s[0] == '"' && s[s.size() - 1] == '"') {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+
+
+
 int main() {
+    
+    //wrong / no data
     ifstream file("data/players.csv");
 
     if (!file) {
@@ -29,7 +43,7 @@ int main() {
             vector<string> fields;
 
             while (getline(ss, field, ',')) {
-                fields.push_back(field);
+                fields.push_back(stripQuotes(field));
             }
 
             cout << fields[3] << " | " << fields[22] << endl;
