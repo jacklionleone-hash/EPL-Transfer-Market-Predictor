@@ -16,7 +16,7 @@ Kaggle "Football Data from Transfermarkt" (davidcariboo), CSVs in data/:
 
 ## Build & run
 From the project root:
-g++ -std=c++17 src/main.cpp -o predictor && ./predictor
+g++ -std=c++17 -O2 src/*.cpp -o predictor && ./predictor
 
 ## Plan
 1. Read players.csv, print first 10 rows + row count
