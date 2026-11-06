@@ -24,11 +24,20 @@ int main() {
     // 1. Load the data (appearances FIRST, so we know who played in the EPL)
     if (!loadAppearances("data/appearances.csv", data)) return 1;
     if (!loadPlayers("data/players.csv", data)) return 1;
+    if (!loadValuations("data/player_valuations.csv", data)) return 1;
 
-    // 2. Training set: active players' 2025/26 season + today's value
-    const int TRAIN_SEASON = 2025;
-    vector<Sample> training = buildTrainingSet(data, TRAIN_SEASON);
-    cout << "Training samples: " << training.size() << endl << endl;
+    // 2. Training set: every season from FIRST to LAST, with each player's
+    //    end-of-season value converted to LAST season's money
+    const int FIRST_TRAIN_SEASON = 2019;   // 2019/20
+    const int LAST_TRAIN_SEASON  = 2025;   // 2025/26 = "today"
+    vector<Sample> training = buildTrainingSet(data, FIRST_TRAIN_SEASON, LAST_TRAIN_SEASON);
+    cout << "Training samples: " << training.size() << endl;
+    for (int season = FIRST_TRAIN_SEASON; season <= LAST_TRAIN_SEASON; season++) {
+        int n = 0;
+        for (const Sample& sm : training) if (sm.season == season) n++;
+        cout << "  " << season << "/" << (season + 1) % 100 << ": " << n << endl;
+    }
+    cout << endl;
     if (training.empty()) {
         cerr << "No training samples, can't train." << endl;
         return 1;

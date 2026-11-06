@@ -103,36 +103,144 @@ bool loadPlayers(const string& path, Dataset& data) {
     return true;
 }
 
-vector<Sample> buildTrainingSet(const Dataset& data, int trainSeason) {
+// Finds a column's index in a header line by its name, or -1 if it's not there
+static int columnIndex(const vector<string>& header, const string& name) {
+    for (int i = 0; i < (int)header.size(); i++) {
+        if (header[i] == name) return i;
+    }
+    return -1;
+}
+
+bool loadValuations(const string& path, Dataset& data) {
+    ifstream file(path);
+    if (!file) {
+        cerr << "Error: couldn't open " << path << endl;
+        return false;
+    }
+
+    // find the columns by NAME, so the order in the file doesn't matter
+    string line;
+    getline(file, line);
+    vector<string> header = splitLine(line);
+    int idCol    = columnIndex(header, "player_id");
+    int dateCol  = columnIndex(header, "date");
+    int valueCol = columnIndex(header, "market_value_in_eur");
+    if (idCol == -1 || dateCol == -1 || valueCol == -1) {
+        cerr << "Error: player_valuations.csv is missing a column. Header was:" << endl;
+        cerr << line << endl;
+        return false;
+    }
+
+    int kept = 0;
+    while (getline(file, line)) {
+        vector<string> fields = splitLine(line);
+        if ((int)fields.size() != (int)header.size()) continue;
+        if (fields[idCol].empty() || fields[valueCol].empty()) continue;
+        if (fields[dateCol].size() < 10) continue;
+
+        int id = stoi(fields[idCol]);
+        if (data.statsById.count(id) == 0) continue;   // only EPL players
+
+        Valuation v;
+        v.date  = fields[dateCol].substr(0, 10);         // "2023-06-01 00:00:00" → "2023-06-01"
+        v.value = stoll(fields[valueCol]);
+        data.valuations[id].push_back(v);
+        kept++;
+    }
+
+    cout << "Valuations stored: " << kept << endl;
+    return true;
+}
+
+long long endOfSeasonValue(const Dataset& data, int playerId, int season) {
+    auto it = data.valuations.find(playerId);
+    if (it == data.valuations.end()) return -1;
+
+    // season 2022 = 2022/23, so look for the last value between Jan 1 and Jul 31, 2023.
+    // Dates in "YYYY-MM-DD" form compare correctly as plain strings.
+    string from = to_string(season + 1) + "-01-01";
+    string to   = to_string(season + 1) + "-07-31";
+
+    string bestDate = "";
+    long long bestValue = -1;
+    for (const Valuation& v : it->second) {
+        if (v.date >= from && v.date <= to && v.date > bestDate) {
+            bestDate = v.date;
+            bestValue = v.value;
+        }
+    }
+    return bestValue;
+}
+
+map<int, double> computeInflation(const Dataset& data, int firstSeason, int targetSeason) {
+    // average end-of-season value of everyone who played an EPL game that season
+    map<int, double> total, count;
+    for (const Player& p : data.players) {
+        auto playerIt = data.statsBySeason.find(p.id);
+        if (playerIt == data.statsBySeason.end()) continue;
+
+        for (int season = firstSeason; season <= targetSeason; season++) {
+            if (playerIt->second.count(season) == 0) continue;
+            long long v = endOfSeasonValue(data, p.id, season);
+            if (v <= 0) continue;
+            total[season] += v;
+            count[season] += 1;
+        }
+    }
+
+    map<int, double> avg, factor;
+    for (int season = firstSeason; season <= targetSeason; season++) {
+        avg[season] = count[season] > 0 ? total[season] / count[season] : 0;
+    }
+    for (int season = firstSeason; season <= targetSeason; season++) {
+        // factor = how many times bigger today's average is than that season's
+        factor[season] = avg[season] > 0 ? avg[targetSeason] / avg[season] : 1.0;
+    }
+    return factor;
+}
+
+vector<Sample> buildTrainingSet(const Dataset& data, int firstSeason, int lastSeason) {
+    map<int, double> inflation = computeInflation(data, firstSeason, lastSeason);
+
+    cout << "Market inflation (multiply old values by this to get "
+         << seasonLabel(lastSeason) << " money):" << endl;
+    for (auto entry : inflation) {
+        cout << "  " << seasonLabel(entry.first) << ": x" << entry.second << endl;
+    }
+    cout << endl;
+
     vector<Sample> training;
 
     for (const Player& p : data.players) {
-        // still active, with a real current value
-        if (p.lastSeason < trainSeason) continue;
-        if (p.marketValue <= 0) continue;
         if (!isAttackOrMidfield(p)) continue;
 
-        // did they play an EPL season in trainSeason?
-        // (.find on a const map: [] would try to create an entry)
+        // .find on a const map: [] would try to create an entry
         auto playerIt = data.statsBySeason.find(p.id);
         if (playerIt == data.statsBySeason.end()) continue;
-        auto seasonIt = playerIt->second.find(trainSeason);
-        if (seasonIt == playerIt->second.end()) continue;
-        Stats s = seasonIt->second;
 
-        if (s.minutes < 1500) continue;              // real season only
+        for (int season = firstSeason; season <= lastSeason; season++) {
+            auto seasonIt = playerIt->second.find(season);
+            if (seasonIt == playerIt->second.end()) continue;
+            Stats s = seasonIt->second;
 
-        int age = ageAtSeason(p.birthDate, trainSeason);
-        if (age == -1) continue;                     // missing birth date
+            if (s.minutes < 1500) continue;              // real season only
 
-        Sample sm;
-        sm.name    = p.name;
-        sm.goals   = s.goals;
-        sm.assists = s.assists;
-        sm.minutes = s.minutes;
-        sm.age     = age;
-        sm.value   = p.marketValue;                  // today's price
-        training.push_back(sm);
+            int age = ageAtSeason(p.birthDate, season);
+            if (age == -1) continue;                     // missing birth date
+
+            long long value = endOfSeasonValue(data, p.id, season);
+            if (value <= 0) continue;                    // no valuation that summer
+
+            Sample sm;
+            sm.name    = p.name;
+            sm.season  = season;
+            sm.goals   = s.goals;
+            sm.assists = s.assists;
+            sm.minutes = s.minutes;
+            sm.age     = age;
+            sm.value   = value * inflation[season];      // in today's money
+            training.push_back(sm);
+        }
     }
     return training;
 }
