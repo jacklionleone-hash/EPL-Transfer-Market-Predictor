@@ -23,6 +23,13 @@ struct Stats {
     int games = 0;
 };
 
+// One training example: a player's stats in a season + their value
+struct Sample {
+    string name;
+    double goals, assists, minutes, age;   // inputs (x's)
+    double value;                          // what we predict (y)
+};
+
 map<int, Stats> statsById;                 // player_id → career EPL totals
 map<int, map<int, Stats>> statsBySeason;   // player_id → (season → Stats)
 
@@ -76,14 +83,21 @@ int findPeakSeason(int id) {
     return bestSeason;
 }
 
-
 // Turns 2018 into "2018/19"
 string seasonLabel(int season) {
     return to_string(season) + "/" + to_string((season + 1) % 100);
 }
 
+// Age at the middle of a season (around Jan 1).
+// Returns -1 if birth date is missing.
+int ageAtSeason(string birthDate, int season) {
+    if (birthDate.empty()) return -1;          // guard: no birth date
+    int birthYear = stoi(birthDate.substr(0, 4));
+    return season - birthYear;
+}
+
 int main() {
-    string line;   // shared by both parts
+    string line;   // shared by all parts
 
     // ===== PART 1: add up EPL stats from appearances.csv =====
     ifstream appFile("data/appearances.csv");
@@ -174,15 +188,45 @@ int main() {
     cout << "Skipped player rows: " << skippedPlayers << endl;
     cout << "EPL players stored: " << players.size() << endl << endl;
 
-    // ===== TEST: Eden Hazard (id 50202) season by season =====
-    cout << "Eden Hazard by season:" << endl;
-    for (auto entry : statsBySeason[50202]) {
-        int season = entry.first;
-        Stats s = entry.second;
-        cout << season << "/" << (season + 1) % 100 << ": "
-             << s.goals << " G, " << s.assists << " A, "
-             << s.games << " games, " << s.minutes << " min" << endl;
+    // ===== PART 3: training set = active players + their 2025/26 season =====
+    const int TRAIN_SEASON = 2025;
+    vector<Sample> training;
+
+    for (Player p : players) {
+        // still active, with a real current value
+        if (p.lastSeason < TRAIN_SEASON) continue;
+        if (p.marketValue <= 0) continue;
+
+        // attackers and midfielders only (for now)
+        if (p.position != "Attack" && p.position != "Midfield") continue;
+
+        // did they play a 2025/26 EPL season? (.count so we don't create an empty one)
+        if (statsBySeason[p.id].count(TRAIN_SEASON) == 0) continue;
+        Stats s = statsBySeason[p.id][TRAIN_SEASON];
+
+        // real season only
+        if (s.minutes < 1500) continue;
+
+        int age = ageAtSeason(p.birthDate, TRAIN_SEASON);
+        if (age == -1) continue;              // missing birth date
+
+        Sample sm;
+        sm.name    = p.name;
+        sm.goals   = s.goals;
+        sm.assists = s.assists;
+        sm.minutes = s.minutes;
+        sm.age     = age;
+        sm.value   = p.marketValue;           // today's price
+        training.push_back(sm);
     }
-    cout << "Hazard's peak: " << seasonLabel(findPeakSeason(50202)) << endl;
+
+    cout << "Training samples: " << training.size() << endl;
+    for (int i = 0; i < 5 && i < (int)training.size(); i++) {
+        Sample sm = training[i];
+        cout << sm.name << " | " << sm.goals << " G, " << sm.assists << " A, "
+             << sm.minutes << " min, age " << sm.age
+             << " | €" << (long long)sm.value << endl;
+    }
+
     return 0;
 }
