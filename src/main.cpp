@@ -46,47 +46,13 @@ vector<string> splitLine(string line) {
 }
 
 int main() {
-    // ===== PART 1: load EPL players from players.csv =====
-    ifstream file("data/players.csv");
-    if (!file) {
-        cerr << "Error: couldn't open data/players.csv" << endl;
-        cerr << "(Are you running from the project root?)" << endl;
-        return 1;
-    }
+    string line;   // shared by both parts
 
-    string line;
-    getline(file, line);  // skip the header
-
-    int count = 0;
-    vector<Player> players;
-
-    while (getline(file, line)) {
-        count++;
-        vector<string> fields = splitLine(line);
-        if (fields.size() < 26) continue;
-
-        // players.csv: column 22 = league, GB1 = Premier League
-        if (fields[22] == "GB1") {
-            Player p;
-            p.id           = stoi(fields[0]);
-            p.name         = fields[3];
-            p.birthDate    = fields[10];
-            p.position     = fields[12];
-            p.subPosition  = fields[11];
-            p.lastSeason   = fields[4].empty()  ? 0 : stoi(fields[4]);
-            p.marketValue  = fields[24].empty() ? 0 : stoll(fields[24]);
-            p.highestValue = fields[25].empty() ? 0 : stoll(fields[25]);
-            players.push_back(p);
-        }
-    }
-
-    cout << "Total players: " << count << endl;
-    cout << "EPL players stored: " << players.size() << endl;
-
-    // ===== PART 2: add up EPL stats from appearances.csv =====
+    // ===== PART 1: add up EPL stats from appearances.csv =====
     ifstream appFile("data/appearances.csv");
     if (!appFile) {
         cerr << "Error: couldn't open data/appearances.csv" << endl;
+        cerr << "(Are you running from the project root?)" << endl;
         return 1;
     }
 
@@ -111,9 +77,46 @@ int main() {
     }
 
     cout << "EPL appearances: " << eplApps << endl;
-    cout << "Players with EPL stats: " << statsById.size() << endl << endl;
+    cout << "Players with EPL stats: " << statsById.size() << endl;
 
-    // ===== TEST: stored players with 50+ EPL goals =====
+    // ===== PART 2: load every player who has played in the EPL =====
+    ifstream file("data/players.csv");
+    if (!file) {
+        cerr << "Error: couldn't open data/players.csv" << endl;
+        return 1;
+    }
+
+    getline(file, line);  // skip the header
+
+    int count = 0;
+    vector<Player> players;
+
+    while (getline(file, line)) {
+        count++;
+        vector<string> fields = splitLine(line);
+        if (fields.size() < 26) continue;
+
+        // keep the player if they have any EPL appearances
+        // (instead of only checking their CURRENT league)
+        int id = stoi(fields[0]);
+        if (statsById.count(id) > 0) {
+            Player p;
+            p.id           = id;
+            p.name         = fields[3];
+            p.birthDate    = fields[10];
+            p.position     = fields[12];
+            p.subPosition  = fields[11];
+            p.lastSeason   = fields[4].empty()  ? 0 : stoi(fields[4]);
+            p.marketValue  = fields[24].empty() ? 0 : stoll(fields[24]);
+            p.highestValue = fields[25].empty() ? 0 : stoll(fields[25]);
+            players.push_back(p);
+        }
+    }
+
+    cout << "Total players: " << count << endl;
+    cout << "EPL players stored: " << players.size() << endl << endl;
+
+    // ===== TEST: players with 50+ EPL goals =====
     for (Player p : players) {
         Stats s = statsById[p.id];
         if (s.goals >= 50) {
