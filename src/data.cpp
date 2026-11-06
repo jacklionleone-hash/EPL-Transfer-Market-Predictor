@@ -22,11 +22,12 @@ bool loadAppearances(const string& path, Dataset& data) {
         vector<string> fields = splitLine(line);
         if (fields.size() != 13) { skippedApps++; continue; }
 
-        // appearances.csv: 2 = player_id, 5 = date, 7 = competition,
-        //                  10 = goals, 11 = assists, 12 = minutes
+        // appearances.csv: 2 = player_id, 3 = player_club_id, 5 = date,
+        //                  7 = competition, 10 = goals, 11 = assists, 12 = minutes
         if (fields[7] != "GB1") continue;
         eplApps++;
         int id = stoi(fields[2]);
+        int clubId = fields[3].empty() ? -1 : stoi(fields[3]);
 
         int goals   = fields[10].empty() ? 0 : stoi(fields[10]);
         int assists = fields[11].empty() ? 0 : stoi(fields[11]);
@@ -39,12 +40,7 @@ bool loadAppearances(const string& path, Dataset& data) {
         career.minutes += minutes;
         career.games++;
 
-        // which season? date looks like "2015-08-08"
-        // Aug–Dec 2015 and Jan–Jun 2016 both count as season 2015
-        string date = fields[5];
-        int year   = stoi(date.substr(0, 4));
-        int month  = stoi(date.substr(5, 2));
-        int season = (month >= 7) ? year : year - 1;
+        int season = seasonFromDate(fields[5]);
 
         // per-season totals
         Stats& seasonStats = data.statsBySeason[id][season];
@@ -52,6 +48,9 @@ bool loadAppearances(const string& path, Dataset& data) {
         seasonStats.assists += assists;
         seasonStats.minutes += minutes;
         seasonStats.games++;
+
+        // minutes per club, so we know which team he mainly played for
+        if (clubId != -1) data.clubMinutes[id][season][clubId] += minutes;
     }
 
     cout << "EPL appearances: " << eplApps << endl;
@@ -152,6 +151,86 @@ bool loadValuations(const string& path, Dataset& data) {
     return true;
 }
 
+bool loadGames(const string& path, Dataset& data) {
+    ifstream file(path);
+    if (!file) {
+        cerr << "Error: couldn't open " << path << endl;
+        return false;
+    }
+
+    string line;
+    getline(file, line);
+    vector<string> header = splitLine(line);
+    int compCol      = columnIndex(header, "competition_id");
+    int dateCol      = columnIndex(header, "date");
+    int homeCol      = columnIndex(header, "home_club_id");
+    int awayCol      = columnIndex(header, "away_club_id");
+    int homeGoalsCol = columnIndex(header, "home_club_goals");
+    int awayGoalsCol = columnIndex(header, "away_club_goals");
+    if (compCol == -1 || dateCol == -1 || homeCol == -1 || awayCol == -1 ||
+        homeGoalsCol == -1 || awayGoalsCol == -1) {
+        cerr << "Error: games.csv is missing a column. Header was:" << endl;
+        cerr << line << endl;
+        return false;
+    }
+
+    // club → season → total points / games played
+    map<int, map<int, int>> points, played;
+    int eplGames = 0;
+
+    while (getline(file, line)) {
+        vector<string> f = splitLine(line);
+        if ((int)f.size() != (int)header.size()) continue;
+        if (f[compCol] != "GB1") continue;
+        if (f[dateCol].size() < 10 || f[homeCol].empty() || f[awayCol].empty()) continue;
+        if (f[homeGoalsCol].empty() || f[awayGoalsCol].empty()) continue;   // not played yet
+
+        int season = seasonFromDate(f[dateCol]);
+        int home = stoi(f[homeCol]), away = stoi(f[awayCol]);
+        int hg = stoi(f[homeGoalsCol]), ag = stoi(f[awayGoalsCol]);
+
+        // win = 3 points, draw = 1, loss = 0
+        if (hg > ag)       points[home][season] += 3;
+        else if (hg < ag)  points[away][season] += 3;
+        else { points[home][season] += 1; points[away][season] += 1; }
+        played[home][season]++;
+        played[away][season]++;
+        eplGames++;
+    }
+
+    for (auto& club : played) {
+        for (auto& s : club.second) {
+            data.teamPPG[club.first][s.first] =
+                (double)points[club.first][s.first] / s.second;
+        }
+    }
+
+    cout << "EPL games: " << eplGames << endl;
+    return true;
+}
+
+double teamStrength(const Dataset& data, int playerId, int season) {
+    auto pIt = data.clubMinutes.find(playerId);
+    if (pIt == data.clubMinutes.end()) return -1;
+    auto sIt = pIt->second.find(season);
+    if (sIt == pIt->second.end()) return -1;
+
+    // the club he played the most minutes for ("keep the best so far" again)
+    int bestClub = -1, bestMinutes = -1;
+    for (auto entry : sIt->second) {
+        if (entry.second > bestMinutes) {
+            bestMinutes = entry.second;
+            bestClub = entry.first;
+        }
+    }
+
+    auto cIt = data.teamPPG.find(bestClub);
+    if (cIt == data.teamPPG.end()) return -1;
+    auto ppgIt = cIt->second.find(season);
+    if (ppgIt == cIt->second.end()) return -1;
+    return ppgIt->second;
+}
+
 long long endOfSeasonValue(const Dataset& data, int playerId, int season) {
     auto it = data.valuations.find(playerId);
     if (it == data.valuations.end()) return -1;
@@ -231,9 +310,14 @@ vector<Sample> buildTrainingSet(const Dataset& data, int firstSeason, int lastSe
             long long value = endOfSeasonValue(data, p.id, season);
             if (value <= 0) continue;                    // no valuation that summer
 
+            double ppg = teamStrength(data, p.id, season);
+            if (ppg < 0) continue;                       // unknown team
+
             Sample sm;
-            sm.name    = p.name;
-            sm.season  = season;
+            sm.name     = p.name;
+            sm.playerId = p.id;
+            sm.season   = season;
+            sm.teamPPG  = ppg;
             sm.goals   = s.goals;
             sm.assists = s.assists;
             sm.minutes = s.minutes;

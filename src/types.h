@@ -29,8 +29,10 @@ struct Stats {
 // One training example: a player's stats in a season + their value
 struct Sample {
     string name;
+    int playerId;
     int season;                            // which season the stats are from
     double goals, assists, minutes, age;   // inputs (x's)
+    double teamPPG;                        // input: their team's points per game that season
     double value;                          // what we predict (y), in €, adjusted to today's market
 };
 
@@ -49,4 +51,11 @@ struct Dataset {
     map<int, Stats> statsById;                 // player_id → career EPL totals
     map<int, SeasonMap> statsBySeason;         // player_id → (season → Stats)
     map<int, vector<Valuation>> valuations;    // player_id → value history
+
+    // player_id → season → club_id → minutes played for that club
+    // (used to find which club a player mainly played for that season)
+    map<int, map<int, map<int, int>>> clubMinutes;
+
+    // club_id → season → points per game in the EPL that season
+    map<int, map<int, double>> teamPPG;
 };

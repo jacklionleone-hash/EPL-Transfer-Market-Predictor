@@ -19,6 +19,14 @@ bool loadPlayers(const string& path, Dataset& data);
 // Call loadAppearances FIRST. Returns false if the file can't be opened.
 bool loadValuations(const string& path, Dataset& data);
 
+// Reads games.csv and works out every EPL club's points per game each season
+// (win = 3, draw = 1). Returns false if the file can't be opened.
+bool loadGames(const string& path, Dataset& data);
+
+// Points per game of the club a player mainly played for that season
+// (the one he played the most minutes for), or -1 if unknown
+double teamStrength(const Dataset& data, int playerId, int season);
+
 // A player's market value at the END of a season (latest valuation between
 // Jan 1 and Jul 31 of the following year), or -1 if there isn't one.
 long long endOfSeasonValue(const Dataset& data, int playerId, int season);

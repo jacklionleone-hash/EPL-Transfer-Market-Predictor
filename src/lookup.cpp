@@ -1,8 +1,10 @@
 // lookup.cpp
 #include "lookup.h"
+#include "data.h"
 #include "helpers.h"
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 
 // All EPL seasons for one player (empty if none)
@@ -17,7 +19,7 @@ void printTopOlderPlayers(const Dataset& data, const Model& model, int howMany) 
         string name, season;
         Stats s;
         int age;
-        double todayValue, peakValueThen;
+        double ppg, todayValue, peakValueThen;
     };
     vector<Result> results;
 
@@ -31,12 +33,16 @@ void printTopOlderPlayers(const Dataset& data, const Model& model, int howMany) 
         int age = ageAtSeason(p.birthDate, peak);
         if (age == -1) continue;
 
+        double ppg = teamStrength(data, p.id, peak);
+        if (ppg < 0) continue;
+
         Result r;
         r.name = p.name;
         r.season = seasonLabel(peak);
         r.s = seasons[peak];
         r.age = age;
-        r.todayValue = model.predictValue(r.s, age);
+        r.ppg = ppg;
+        r.todayValue = model.predictValue(r.s.goals, r.s.assists, r.s.minutes, age, ppg);
         r.peakValueThen = p.highestValue / 1000000.0;
         results.push_back(r);
     }
@@ -50,7 +56,8 @@ void printTopOlderPlayers(const Dataset& data, const Model& model, int howMany) 
     for (int i = 0; i < howMany && i < (int)results.size(); i++) {
         const Result& r = results[i];
         cout << i + 1 << ". " << r.name << " (" << r.season << ", age " << r.age << ") "
-             << r.s.goals << " G, " << r.s.assists << " A"
+             << r.s.goals << " G, " << r.s.assists << " A, team "
+             << fixed << setprecision(2) << r.ppg << defaultfloat << setprecision(6) << " pts/game"
              << " → today: €" << (int)r.todayValue << "M"
              << " | career peak value: €" << (int)r.peakValueThen << "M" << endl;
     }
@@ -145,13 +152,21 @@ void runLookup(const Dataset& data, const Model& model) {
             continue;
         }
 
+        double ppg = teamStrength(data, chosen.id, season);
+        if (ppg < 0) {
+            cout << "Couldn't find " << chosen.name << "'s team that season, can't predict." << endl;
+            continue;
+        }
+
         // --- predict ---
         Stats s = seasons[season];
-        double value = model.predictValue(s, age);
+        double value = model.predictValue(s.goals, s.assists, s.minutes, age, ppg);
 
         cout << endl << chosen.name << " in " << seasonLabel(season)
              << " (age " << age << "): " << s.goals << " G, "
-             << s.assists << " A, " << s.minutes << " min" << endl;
+             << s.assists << " A, " << s.minutes << " min, team "
+             << fixed << setprecision(2) << ppg << defaultfloat << setprecision(6)
+             << " pts/game" << endl;
         cout << "→ Estimated value in today's market: €"
              << (value < 0 ? 0 : (int)value) << "M" << endl;
 
