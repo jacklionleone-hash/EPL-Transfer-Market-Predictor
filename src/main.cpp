@@ -55,6 +55,33 @@ vector<string> splitLine(const string& line) {
     return fields;
 }
 
+// Returns the season with the most goals + assists (min 1500 minutes).
+// Returns -1 if the player never had a full-enough season.
+int findPeakSeason(int id) {
+    int bestSeason = -1;
+    int bestGA = -1;
+
+    for (auto entry : statsBySeason[id]) {
+        int season = entry.first;
+        Stats s = entry.second;
+
+        if (s.minutes < 1500) continue;
+        int ga = s.goals + s.assists;
+
+        if (ga > bestGA) {
+            bestGA = ga;
+            bestSeason = season;
+        }
+    }
+    return bestSeason;
+}
+
+
+// Turns 2018 into "2018/19"
+string seasonLabel(int season) {
+    return to_string(season) + "/" + to_string((season + 1) % 100);
+}
+
 int main() {
     string line;   // shared by both parts
 
@@ -156,6 +183,6 @@ int main() {
              << s.goals << " G, " << s.assists << " A, "
              << s.games << " games, " << s.minutes << " min" << endl;
     }
-
+    cout << "Hazard's peak: " << seasonLabel(findPeakSeason(50202)) << endl;
     return 0;
 }
