@@ -22,9 +22,9 @@ struct Stats {
     int minutes = 0;
     int games = 0;
 };
+
 map<int, Stats> statsById;                 // player_id → career EPL totals
 map<int, map<int, Stats>> statsBySeason;   // player_id → (season → Stats)
-
 
 // Splits one CSV line into fields.
 // Commas INSIDE quotes don't split, and the quotes get removed.
@@ -74,16 +74,34 @@ int main() {
         vector<string> fields = splitLine(line);
         if (fields.size() != 13) { skippedApps++; continue; }
 
-        // appearances.csv: 2 = player_id, 7 = competition,
+        // appearances.csv: 2 = player_id, 5 = date, 7 = competition,
         //                  10 = goals, 11 = assists, 12 = minutes
         if (fields[7] == "GB1") {
             eplApps++;
             int id = stoi(fields[2]);
 
-            statsById[id].goals   += fields[10].empty() ? 0 : stoi(fields[10]);
-            statsById[id].assists += fields[11].empty() ? 0 : stoi(fields[11]);
-            statsById[id].minutes += fields[12].empty() ? 0 : stoi(fields[12]);
+            int goals   = fields[10].empty() ? 0 : stoi(fields[10]);
+            int assists = fields[11].empty() ? 0 : stoi(fields[11]);
+            int minutes = fields[12].empty() ? 0 : stoi(fields[12]);
+
+            // career totals
+            statsById[id].goals   += goals;
+            statsById[id].assists += assists;
+            statsById[id].minutes += minutes;
             statsById[id].games++;
+
+            // which season? date looks like "2015-08-08"
+            // Aug–Dec 2015 and Jan–Jun 2016 both count as season 2015
+            string date = fields[5];
+            int year   = stoi(date.substr(0, 4));
+            int month  = stoi(date.substr(5, 2));
+            int season = (month >= 7) ? year : year - 1;
+
+            // per-season totals
+            statsBySeason[id][season].goals   += goals;
+            statsBySeason[id][season].assists += assists;
+            statsBySeason[id][season].minutes += minutes;
+            statsBySeason[id][season].games++;
         }
     }
 
@@ -129,20 +147,15 @@ int main() {
     cout << "Skipped player rows: " << skippedPlayers << endl;
     cout << "EPL players stored: " << players.size() << endl << endl;
 
-    // ===== TEST: players with 50+ EPL goals =====
-    for (Player p : players) {
-        Stats s = statsById[p.id];
-        if (s.goals >= 50) {
-            cout << p.name << " | " << s.goals << " G, "
-                 << s.assists << " A, " << s.games << " games" << endl;
-        }
+    // ===== TEST: Eden Hazard (id 50202) season by season =====
+    cout << "Eden Hazard by season:" << endl;
+    for (auto entry : statsBySeason[50202]) {
+        int season = entry.first;
+        Stats s = entry.second;
+        cout << season << "/" << (season + 1) % 100 << ": "
+             << s.goals << " G, " << s.assists << " A, "
+             << s.games << " games, " << s.minutes << " min" << endl;
     }
 
-
-    for (auto entry : statsBySeason[50202]) {   // Hazard's player_id: find it in players.csv
-    int season = entry.first;
-    Stats s = entry.second;
-    cout << season << ": " << s.goals << " G, " << s.assists << " A" << endl;
-}
     return 0;
 }
