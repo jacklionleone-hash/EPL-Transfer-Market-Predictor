@@ -3,7 +3,14 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <array>
+#include <cmath>
+#include <algorithm>
 using namespace std;
+
+// Number of input features the model uses: goals, assists, minutes, age
+const int NF = 4;
+using Features = array<double, NF>;
 
 struct Player {
     int id;
@@ -94,6 +101,29 @@ int ageAtSeason(string birthDate, int season) {
     if (birthDate.empty()) return -1;          // guard: no birth date
     int birthYear = stoi(birthDate.substr(0, 4));
     return season - birthYear;
+}
+
+// Turns one season of stats + age into the model's input list
+Features makeFeatures(const Stats& s, int age) {
+    return { (double)s.goals, (double)s.assists, (double)s.minutes, (double)age };
+}
+
+// Standardize: x' = (x - mean) / std, using the TRAINING set's mean and std
+Features normalize(const Features& x, const Features& mean, const Features& sd) {
+    Features out;
+    for (int j = 0; j < NF; j++) {
+        out[j] = (x[j] - mean[j]) / sd[j];
+    }
+    return out;
+}
+
+// The model: value = w1*x1 + w2*x2 + w3*x3 + w4*x4 + b  (in € millions)
+double predict(const Features& x, const Features& w, double b) {
+    double y = b;
+    for (int j = 0; j < NF; j++) {
+        y += w[j] * x[j];
+    }
+    return y;
 }
 
 int main() {
@@ -220,12 +250,123 @@ int main() {
         training.push_back(sm);
     }
 
-    cout << "Training samples: " << training.size() << endl;
-    for (int i = 0; i < 5 && i < (int)training.size(); i++) {
-        Sample sm = training[i];
-        cout << sm.name << " | " << sm.goals << " G, " << sm.assists << " A, "
-             << sm.minutes << " min, age " << sm.age
-             << " | €" << (long long)sm.value << endl;
+    cout << "Training samples: " << training.size() << endl << endl;
+    int n = training.size();
+    if (n == 0) {
+        cerr << "No training samples, can't train." << endl;
+        return 1;
+    }
+
+    // ===== PART 4: normalize the training data =====
+    // X = inputs, y = values in € millions
+    vector<Features> X(n);
+    vector<double> y(n);
+    for (int i = 0; i < n; i++) {
+        X[i] = { training[i].goals, training[i].assists,
+                 training[i].minutes, training[i].age };
+        y[i] = training[i].value / 1000000.0;
+    }
+
+    // mean of each feature: add up, divide by n
+    Features mean{};
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < NF; j++)
+            mean[j] += X[i][j] / n;
+
+    // std dev of each feature: average squared distance from mean, then sqrt
+    Features sd{};
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < NF; j++)
+            sd[j] += (X[i][j] - mean[j]) * (X[i][j] - mean[j]) / n;
+    for (int j = 0; j < NF; j++) {
+        sd[j] = sqrt(sd[j]);
+        if (sd[j] == 0) sd[j] = 1;   // avoid dividing by zero
+    }
+
+    vector<Features> Xn(n);
+    for (int i = 0; i < n; i++) Xn[i] = normalize(X[i], mean, sd);
+
+    // ===== PART 5: train with gradient descent =====
+    Features w{};          // all weights start at 0
+    double b = 0;
+    double alpha = 0.05;   // learning rate (step size)
+    int epochs = 5000;     // how many times to loop over all players
+
+    for (int epoch = 0; epoch <= epochs; epoch++) {
+        Features gradW{};
+        double gradB = 0;
+        double loss = 0;
+
+        for (int i = 0; i < n; i++) {
+            double err = predict(Xn[i], w, b) - y[i];   // how wrong for player i
+            loss += err * err / n;
+            for (int j = 0; j < NF; j++)
+                gradW[j] += 2.0 * err * Xn[i][j] / n;
+            gradB += 2.0 * err / n;
+        }
+
+        // step AGAINST the gradient (minus!)
+        for (int j = 0; j < NF; j++) w[j] -= alpha * gradW[j];
+        b -= alpha * gradB;
+
+        if (epoch % 1000 == 0) {
+            cout << "epoch " << epoch << " | avg error: €"
+                 << sqrt(loss) << "M" << endl;
+        }
+    }
+
+    // What the model learned (per 1 standard deviation of each stat)
+    string names[NF] = { "goals", "assists", "minutes", "age" };
+    cout << endl << "Learned weights (€M per 1 std dev):" << endl;
+    for (int j = 0; j < NF; j++) {
+        cout << "  " << names[j] << ": " << w[j]
+             << "   (1 std dev = " << sd[j] << ")" << endl;
+    }
+    cout << "  baseline: " << b << endl << endl;
+
+    // ===== PART 6: value older players' peak seasons in today's market =====
+    struct Result {
+        string name, season;
+        Stats s;
+        int age;
+        double todayValue, peakValueThen;
+    };
+    vector<Result> results;
+
+    for (Player p : players) {
+        if (p.position != "Attack" && p.position != "Midfield") continue;
+
+        int peak = findPeakSeason(p.id);
+        if (peak == -1 || peak > 2018) continue;   // "older" = peak 2012/13 – 2018/19
+
+        int age = ageAtSeason(p.birthDate, peak);
+        if (age == -1) continue;
+
+        Stats s = statsBySeason[p.id][peak];
+        Features x = normalize(makeFeatures(s, age), mean, sd);
+
+        Result r;
+        r.name = p.name;
+        r.season = seasonLabel(peak);
+        r.s = s;
+        r.age = age;
+        r.todayValue = predict(x, w, b);
+        r.peakValueThen = p.highestValue / 1000000.0;
+        results.push_back(r);
+    }
+
+    // sort highest predicted value first
+    sort(results.begin(), results.end(), [](const Result& a, const Result& b) {
+        return a.todayValue > b.todayValue;
+    });
+
+    cout << "Top 20: older players' peak seasons, valued in TODAY's market" << endl;
+    for (int i = 0; i < 20 && i < (int)results.size(); i++) {
+        Result r = results[i];
+        cout << i + 1 << ". " << r.name << " (" << r.season << ", age " << r.age << ") "
+             << r.s.goals << " G, " << r.s.assists << " A"
+             << " → today: €" << (int)r.todayValue << "M"
+             << " | career peak value: €" << (int)r.peakValueThen << "M" << endl;
     }
 
     return 0;
