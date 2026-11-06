@@ -75,10 +75,9 @@ int main() {
             p.position = fields[12];
             p.subPosition = fields[11];
             p.lastSeason = stoi(fields[4]);
-            p.marketValue = stoi(fields[24]);
-            p.highestValue = stoi(fields[25]);
+            p.marketValue = stoll(fields[24]);
+            p.highestValue = stoll(fields[25]);
             players.push_back(p);
-
             // print only the first 10 EPL players
             if (eplCount <= 10) {
                 cout << fields[3] << " | " << fields[23] << endl;
@@ -89,6 +88,13 @@ int main() {
     cout << endl << "Total players: " << count << endl;
     cout << "EPL players: " << eplCount << endl;
     cout <<players.size() << endl;
+
+
+    for (Player p : players) {
+    if (p.highestValue > 50000000) {
+        cout << p.name << " | peak: €" << p.highestValue << endl;
+    }
+}
 
     return 0;
 }
