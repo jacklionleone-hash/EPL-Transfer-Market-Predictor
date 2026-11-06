@@ -22,8 +22,9 @@ struct Stats {
     int minutes = 0;
     int games = 0;
 };
+map<int, Stats> statsById;                 // player_id → career EPL totals
+map<int, map<int, Stats>> statsBySeason;   // player_id → (season → Stats)
 
-map<int, Stats> statsById;   // player_id → their EPL totals
 
 // Splits one CSV line into fields.
 // Commas INSIDE quotes don't split, and the quotes get removed.
@@ -137,5 +138,11 @@ int main() {
         }
     }
 
+
+    for (auto entry : statsBySeason[50202]) {   // Hazard's player_id: find it in players.csv
+    int season = entry.first;
+    Stats s = entry.second;
+    cout << season << ": " << s.goals << " G, " << s.assists << " A" << endl;
+}
     return 0;
 }
